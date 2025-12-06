@@ -814,54 +814,60 @@ df -h /data/shared/backups
 
 ### 标准提示词模板
 ```bash
-你是我的系统架构师。请基于 "Infrastructure as Data" 架构规范，为我生成符合生产环境标准的 Docker Compose 配置。
+你是我的系统架构师。请基于 **"Infrastructure as Data"** 架构规范，为我生成符合生产环境标准的 Docker Compose 部署方案。
+
+【角色目标】
+生成一份“零摩擦”的部署配置，确保服务启动即通过，无需手动进入容器修改配置，且文件结构清晰、权限正确。
 
 【强制规范】
 
-1.  **持久化目录标准**：
-    * 应用配置：挂载 `./data`（当前 compose 所在目录下的子目录）
-    * 媒体/大文件：挂载 `/data/shared/media`（全局共享，只读建议）
-    * 数据库文件：挂载 `./data/db`
-    * *注意：必须确保宿主机目录权限归属为 PUID:PGID*
+1. **输出顺序标准（严格执行）**
+    * **第一步 (`init.sh`)**：文件系统初始化、权限修正、核心配置预埋。
+    * **第二步 (`compose.yaml`)**：容器编排定义。
+    * **第三步 (`Caddyfile`)**：反向代理配置。
 
-2.  **网络配置（修改点）**：
-    * **必须显式映射端口**：使用 `ports` 暴露端口（格式 `宿主机端口:容器端口`），以便处理端口冲突或支持多实例部署。
-    * 同时必须加入外部网络 `proxynet`（用于 Caddy 内部反代，双链路保证）。
+2. **持久化目录标准**
+    * 应用配置：挂载 `./data`（当前 compose 所在目录下的子目录）。
+    * 媒体/大文件：挂载 `/data/shared/media`（全局共享，只读建议）。
+    * 数据库文件：挂载 `./data/db`。
+    * **权限原则**：必须确保宿主机挂载目录的权限归属为 `PUID:PGID`。
 
-3.  **环境变量（必须）**：
-    * PUID=1000
-    * PGID=1000
-    * TZ=Asia/Shanghai
+3. **网络与端口策略**
+    * **显式映射端口**：必须使用 `ports` 暴露主要端口（格式 `宿主机端口:容器端口`），以便支持直连调试。
+    * **外部网络**：必须加入外部网络 `proxynet`（用于 Caddy 内部通信）。
+    * **敏感服务检查**：如果服务属于易受攻击或有默认访问限制的类型（如 qBittorrent, Jupyter, Redis）：
+        * 必须在 `init.sh` 中预生成配置文件以允许非 Localhost 访问（关闭 HostHeaderValidation 等）。
+        * 或者在注释中明确提示是否需要为了安全而移除 `ports` 映射。
 
-4.  **容器配置**：
-    * restart: unless-stopped
-    * 添加 label: `com.centurylinklabs.watchtower.enable=true`
-    * **容器名称**：请指定一个默认名称，但允许我通过修改 `container_name` 来实现多开。
-
-5.  **反向代理**：
-    * 附带 Caddyfile 片段
-    * 格式：`服务名.example.com { reverse_proxy 容器名:内部端口 }`
-
-6.  **安全性**：
-    * 数据库密码禁止使用默认值
-    * 敏感信息优先使用 environment 变量
-    * 禁止 root 运行（除非必需，使用 user: 1000:1000）
+4. **环境与容器配置**
+    * **环境变量**：`PUID=1000`, `PGID=1000`, `TZ=Asia/Shanghai`。
+    * **重启策略**：`restart: unless-stopped`。
+    * **更新管理**：添加 label `com.centurylinklabs.watchtower.enable=true`。
+    * **安全性**：禁止使用默认密码（使用 `environment` 传递强密码或随机生成），非必要不使用 root 运行。
 
 【输出要求】
 
-1.  不要任何解释或说明
-2.  直接输出 **三个** 代码块：
-    * 第一个：`compose.yaml`（必须包含 `ports` 映射）
-    * 第二个：`Caddyfile` 片段
-    * 第三个：`init.sh`
-        * 内容：包含 `mkdir -p` 创建 ./data 及其子目录的命令
-        * 内容：包含 `chown -R 1000:1000` 修正 ./data 权限的命令
-        * 内容：包含 `chmod` 赋予自身执行权限的提示
-3.  使用标准语法，确保配置可直接复制使用
+**请不要输出任何解释性废话，直接按顺序输出以下三个代码块：**
 
-【任务】
+#### Block 1: `init.sh`
+* **功能**：一键初始化脚本。
+* **内容要求**：
+    1.  `mkdir -p` 创建所有挂载目录。
+    2.  **[关键] 配置预埋**：对于 qBittorrent 等默认拒绝公网 IP 访问的服务，**必须**在此处使用 `cat > ... <<EOF` 预写入配置文件（如关闭 CSRF/HostHeader 检查），确保服务启动后不会报 "Unauthorized"。
+    3.  `chown -R 1000:1000` 修正目录权限。
+    4.  输出 "Initialization complete" 提示。
 
-请为我部署：[这里填入你想部署的服务]
+#### Block 2: `compose.yaml`
+* 包含完整的服务定义，显式端口映射，网络配置。
+
+#### Block 3: `Caddyfile`
+* 格式：`服务名.example.com { reverse_proxy 容器名:内部端口 }`
+
+---
+
+**【当前任务】**
+
+请为我部署：[在此处输入服务名称，例如：qBittorrent]
 ```
 ---
 
