@@ -818,50 +818,50 @@ df -h /data/shared/backups
 
 【强制规范】
 
-1. 持久化目录标准：
-   - 应用配置：挂载 ./data（当前 compose 所在目录下的子目录）
-   - 媒体/大文件：挂载 /data/shared/media（全局共享，只读建议）
-   - 数据库文件：挂载 ./data/db
-   - *注意：必须确保宿主机目录权限归属为 PUID:PGID*
+1.  **持久化目录标准**：
+    * 应用配置：挂载 `./data`（当前 compose 所在目录下的子目录）
+    * 媒体/大文件：挂载 `/data/shared/media`（全局共享，只读建议）
+    * 数据库文件：挂载 `./data/db`
+    * *注意：必须确保宿主机目录权限归属为 PUID:PGID*
 
-2. 网络配置：
-   - 禁止使用 ports 暴露端口（由 Caddy 统一反代）
-   - 必须加入外部网络 proxynet
-   - 特例：仅管理面板可显式暴露端口
+2.  **网络配置（修改点）**：
+    * **必须显式映射端口**：使用 `ports` 暴露端口（格式 `宿主机端口:容器端口`），以便处理端口冲突或支持多实例部署。
+    * 同时必须加入外部网络 `proxynet`（用于 Caddy 内部反代，双链路保证）。
 
-3. 环境变量（必须）：
-   - PUID=1000
-   - PGID=1000
-   - TZ=Asia/Shanghai
+3.  **环境变量（必须）**：
+    * PUID=1000
+    * PGID=1000
+    * TZ=Asia/Shanghai
 
-4. 容器配置：
-   - restart: unless-stopped
-   - 添加 label: com.centurylinklabs.watchtower.enable=true
+4.  **容器配置**：
+    * restart: unless-stopped
+    * 添加 label: `com.centurylinklabs.watchtower.enable=true`
+    * **容器名称**：请指定一个默认名称，但允许我通过修改 `container_name` 来实现多开。
 
-5. 反向代理：
-   - 附带 Caddyfile 片段
-   - 格式：服务名.example.com { reverse_proxy 容器名:内部端口 }
+5.  **反向代理**：
+    * 附带 Caddyfile 片段
+    * 格式：`服务名.example.com { reverse_proxy 容器名:内部端口 }`
 
-6. 安全性：
-   - 数据库密码禁止使用默认值
-   - 敏感信息优先使用 environment 变量
-   - 禁止 root 运行（除非必需）
+6.  **安全性**：
+    * 数据库密码禁止使用默认值
+    * 敏感信息优先使用 environment 变量
+    * 禁止 root 运行（除非必需，使用 user: 1000:1000）
 
 【输出要求】
 
-1. 不要任何解释或说明
-2. 直接输出 **三个** 代码块：
-   - 第一个：`compose.yaml`
-   - 第二个：`Caddyfile` 片段
-   - 第三个：`init.sh`
-     - 内容：包含 `mkdir -p` 创建 ./data 及其子目录的命令
-     - 内容：包含 `chown -R 1000:1000` 修正 ./data 权限的命令
-     - 内容：包含 `chmod` 赋予自身执行权限的提示
-3. 使用标准语法，确保配置可直接复制使用
+1.  不要任何解释或说明
+2.  直接输出 **三个** 代码块：
+    * 第一个：`compose.yaml`（必须包含 `ports` 映射）
+    * 第二个：`Caddyfile` 片段
+    * 第三个：`init.sh`
+        * 内容：包含 `mkdir -p` 创建 ./data 及其子目录的命令
+        * 内容：包含 `chown -R 1000:1000` 修正 ./data 权限的命令
+        * 内容：包含 `chmod` 赋予自身执行权限的提示
+3.  使用标准语法，确保配置可直接复制使用
 
 【任务】
 
-请为我部署：[此处填写服务名称]
+请为我部署：[这里填入你想部署的服务]
 ```
 ---
 
