@@ -95,23 +95,18 @@ Dockge 是基于文件的管理工具，完美契合本方案。
   * 目录：`/data/stacks/dockge`
   * 文件：`compose.yaml`
 
-<!-- end list -->
 ```bash
-nano docker-compose.yml
-```
-```yaml
+mkdir -p /data/stacks/dockge && cd /data/stacks/dockge && cat > compose.yaml << 'EOF'
 services:
   dockge:
     image: louislam/dockge:1
     container_name: dockge
     restart: unless-stopped
     ports:
-      # 只暴露管理面板端口，建议通过 SSH 隧道访问或再套一层 VPN，也可通过 Caddy 暴露
       - "5001:5001"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      -./data:/app/data
-      # ⚠️ 关键：让 Dockge 管理 /data/stacks 目录
+      - ./data:/app/data
       - /data/stacks:/data/stacks
     environment:
       - DOCKGE_STACKS_DIR=/data/stacks
@@ -121,12 +116,7 @@ services:
 networks:
   proxynet:
     external: true
-```
-
-启动：
-
-```bash
-cd /data/stacks/dockge
+EOF
 docker compose up -d
 ```
 
