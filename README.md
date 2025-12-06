@@ -206,6 +206,207 @@ echo "📝 配置文件: /data/stacks/caddy/Caddyfile"
 echo "🔍 测试命令: curl http://localhost/health"
 ```
 
+### caddy的一键脚本
+```bash
+# 一键部署 Caddy 管理快捷命令
+cat > /usr/local/bin/caddy << 'EOF'
+#!/bin/bash
+
+# Caddy 管理脚本
+# 工作目录
+CADDY_DIR="/data/stacks/caddy"
+CADDYFILE="$CADDY_DIR/Caddyfile"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 检查是否在正确的目录
+check_dir() {
+    if [ ! -d "$CADDY_DIR" ]; then
+        echo -e "${RED}错误: Caddy 目录不存在 ($CADDY_DIR)${NC}"
+        exit 1
+    fi
+}
+
+# 显示菜单
+show_menu() {
+    clear
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}       Caddy 管理工具${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+    echo -e "${GREEN}1.${NC} 启动 Caddy"
+    echo -e "${GREEN}2.${NC} 关闭 Caddy"
+    echo -e "${GREEN}3.${NC} 编辑配置文件"
+    echo -e "${GREEN}4.${NC} 重载配置"
+    echo -e "${GREEN}5.${NC} 重启 Caddy"
+    echo -e "${GREEN}6.${NC} 查看状态"
+    echo -e "${GREEN}7.${NC} 查看日志"
+    echo -e "${GREEN}8.${NC} 测试配置"
+    echo -e "${GREEN}0.${NC} 退出"
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+}
+
+# 启动 Caddy
+start_caddy() {
+    echo -e "${YELLOW}正在启动 Caddy...${NC}"
+    cd $CADDY_DIR
+    docker compose up -d
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ Caddy 启动成功${NC}"
+    else
+        echo -e "${RED}❌ Caddy 启动失败${NC}"
+    fi
+}
+
+# 关闭 Caddy
+stop_caddy() {
+    echo -e "${YELLOW}正在关闭 Caddy...${NC}"
+    cd $CADDY_DIR
+    docker compose down
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ Caddy 已关闭${NC}"
+    else
+        echo -e "${RED}❌ Caddy 关闭失败${NC}"
+    fi
+}
+
+# 编辑配置文件
+edit_config() {
+    echo -e "${YELLOW}打开配置文件编辑器...${NC}"
+    echo -e "${BLUE}配置文件路径: $CADDYFILE${NC}"
+    
+    # 使用用户默认编辑器，如果没有则依次尝试 vim, vi, nano
+    if [ -n "$EDITOR" ]; then
+        $EDITOR $CADDYFILE
+    elif command -v vim &> /dev/null; then
+        vim $CADDYFILE
+    elif command -v vi &> /dev/null; then
+        vi $CADDYFILE
+    elif command -v nano &> /dev/null; then
+        nano $CADDYFILE
+    else
+        echo -e "${RED}❌ 未找到可用的编辑器${NC}"
+        return 1
+    fi
+    
+    # 编辑完成后询问是否重载
+    echo ""
+    echo -e "${YELLOW}配置文件已编辑完成${NC}"
+    read -p "是否重载 Caddy 配置？(y/n): " choice
+    case "$choice" in 
+        y|Y|yes|YES ) reload_caddy;;
+        * ) echo -e "${BLUE}已取消重载${NC}";;
+    esac
+}
+
+# 重载配置
+reload_caddy() {
+    echo -e "${YELLOW}正在重载 Caddy 配置...${NC}"
+    docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ 配置重载成功${NC}"
+    else
+        echo -e "${RED}❌ 配置重载失败${NC}"
+    fi
+}
+
+# 重启 Caddy
+restart_caddy() {
+    echo -e "${YELLOW}正在重启 Caddy...${NC}"
+    cd $CADDY_DIR
+    docker compose restart
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ Caddy 重启成功${NC}"
+    else
+        echo -e "${RED}❌ Caddy 重启失败${NC}"
+    fi
+}
+
+# 查看状态
+show_status() {
+    echo -e "${BLUE}========== Caddy 状态 ==========${NC}"
+    cd $CADDY_DIR
+    docker compose ps
+    echo ""
+    echo -e "${BLUE}========== 容器详情 ==========${NC}"
+    docker inspect caddy --format='{{.State.Status}}' 2>/dev/null
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}容器运行状态: $(docker inspect caddy --format='{{.State.Status}}')${NC}"
+        echo -e "${GREEN}启动时间: $(docker inspect caddy --format='{{.State.StartedAt}}')${NC}"
+    else
+        echo -e "${RED}容器未运行${NC}"
+    fi
+}
+
+# 查看日志
+show_logs() {
+    echo -e "${YELLOW}显示 Caddy 日志 (Ctrl+C 退出)${NC}"
+    cd $CADDY_DIR
+    docker compose logs -f --tail=50
+}
+
+# 测试配置
+test_config() {
+    echo -e "${YELLOW}正在测试 Caddy 配置...${NC}"
+    docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ 配置文件语法正确${NC}"
+    else
+        echo -e "${RED}❌ 配置文件有错误${NC}"
+    fi
+}
+
+# 主循环
+main() {
+    check_dir
+    
+    while true; do
+        show_menu
+        read -p "请选择操作 [0-8]: " choice
+        echo ""
+        
+        case $choice in
+            1) start_caddy ;;
+            2) stop_caddy ;;
+            3) edit_config ;;
+            4) reload_caddy ;;
+            5) restart_caddy ;;
+            6) show_status ;;
+            7) show_logs ;;
+            8) test_config ;;
+            0) 
+                echo -e "${GREEN}退出 Caddy 管理工具${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}无效的选择，请重新输入${NC}"
+                ;;
+        esac
+        
+        echo ""
+        read -p "按 Enter 键继续..." dummy
+    done
+}
+
+# 运行主程序
+main
+EOF
+
+chmod +x /usr/local/bin/caddy
+
+echo ""
+echo "✅ Caddy 管理命令已安装完成！"
+echo "📝 现在你可以在任何地方输入 'caddy' 来管理 Caddy 了"
+echo ""
+```
+
+
 ### 2.3 部署 Watchtower（自动更新容器）
 
 ```bash
