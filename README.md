@@ -206,7 +206,7 @@ echo "📝 配置文件: /data/stacks/caddy/Caddyfile"
 echo "🔍 测试命令: curl http://localhost/health"
 ```
 
-### caddy的一键脚本
+### Caddy的一键脚本
 ```bash
 # 一键部署 Caddy 管理快捷命令
 cat > /usr/local/bin/caddy << 'EOF'
