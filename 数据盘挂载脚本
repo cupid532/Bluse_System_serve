@@ -1,0 +1,23 @@
+# 先看看有哪些未挂载的磁盘
+echo "未挂载的磁盘列表："
+lsblk -o NAME,SIZE,TYPE,MOUNTPOINT | grep disk | grep -v "/$"
+
+# 然后手动设置磁盘（改成你的实际磁盘名）
+read -p "请输入要挂载的磁盘（例如 sdb）: " DISK_NAME
+DISK="/dev/$DISK_NAME"
+
+# 确认一下
+echo "即将格式化: $DISK"
+read -p "确认吗？输入 YES 继续: " confirm
+
+if [ "$confirm" = "YES" ]; then
+    sudo mkfs.ext4 -F $DISK
+    sudo mkdir -p /data
+    sudo mount $DISK /data
+    UUID=$(sudo blkid -s UUID -o value $DISK)
+    echo "UUID=$UUID /data ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+    echo "✅ 挂载完成！"
+    df -h /data
+else
+    echo "❌ 已取消"
+fi
