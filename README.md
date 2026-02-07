@@ -10,14 +10,57 @@ apt install curl -y
 ```
 ### 1.2安装 Docker
 ```bash
-echo "📦 正在安装 Docker..."
+#!/bin/bash
+
+# ==========================================
+# 步骤 1: 选择安装源
+# ==========================================
+echo "请选择 Docker 安装源："
+echo "1) 官方国外源 (Default)"
+echo "2) 国内镜像源 (阿里云)"
+echo "3) 自定义镜像源"
+read -p "请输入数字 [1/2/3]: " source_choice
+
+# 默认选择 1
+source_choice=${source_choice:-1}
+
+# ==========================================
+# 步骤 2: 安装 Docker
+# ==========================================
+echo "📦 正在检查并安装 Docker..."
+
 if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com | sh
+    case $source_choice in
+        1)
+            echo "正在从官方源安装..."
+            curl -fsSL https://get.docker.com | sh
+            ;;
+        2)
+            echo "正在从阿里云镜像源安装..."
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            sh get-docker.sh --mirror Aliyun
+            rm -f get-docker.sh
+            ;;
+        3)
+            read -p "请输入自定义安装脚本 URL: " custom_url
+            curl -fsSL $custom_url | sh
+            ;;
+        *)
+            echo "无效选项，退出安装。"
+            exit 1
+            ;;
+    esac
+
     systemctl enable docker
     systemctl start docker
+    echo "✓ Docker 安装完成"
 else
-    echo "✓ Docker 已安装"
+    echo "✓ Docker 已存在，跳过安装阶段"
 fi
+
+# ==========================================
+# 步骤 3: 基础环境配置 (你的原有逻辑)
+# ==========================================
 
 # 创建专用网络
 echo "🌐 创建 Docker 网络..."
@@ -27,7 +70,7 @@ docker network create proxynet 2>/dev/null || echo "✓ 网络 proxynet 已存�
 echo "📁 创建目录结构..."
 mkdir -p /data/{stacks,shared/{media,downloads,backups},scripts,logs}
 
-# 设置权限（更安全的权限模型）
+# 设置权限
 echo "🔐 配置权限..."
 chown -R 1000:1000 /data
 chmod 750 /data
@@ -42,14 +85,20 @@ PGID=1000
 TZ=Asia/Shanghai
 ENVEOF
 
-# 显示目录结构
+# ==========================================
+# 步骤 4: 结果展示
+# ==========================================
 echo ""
 echo "✅ 环境初始化完毕！目录结构："
 tree -L 2 /data 2>/dev/null || ls -lah /data
 
 echo ""
 echo "📊 系统信息："
-echo "- Docker 版本: $(docker --version)"
+if command -v docker &> /dev/null; then
+    echo "- Docker 版本: $(docker --version)"
+else
+    echo "- Docker 版本: 未安装成功"
+fi
 echo "- 数据目录: /data"
 echo "- 可用空间: $(df -h /data | tail -1 | awk '{print $4}')"
 ```
