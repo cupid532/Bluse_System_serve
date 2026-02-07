@@ -6,7 +6,7 @@ caddy（一键反代）
 #!/bin/bash
 
 # =================================================================
-# 🚀 服务器运维集成管理系统 (标准化 V5.5)
+# 🚀 服务器运维集成管理系统 (V5.9 - 修复 IP 显示 Bug 版)
 # =================================================================
 
 # 🎨 颜色定义
@@ -18,63 +18,84 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# --- 0. 基础工具函数 (提前定义) ---
+
+# 🛡️ 核心修复：IP 获取与清洗函数
+# 参数 1: IPv4 或 IPv6 (4/6)
+get_public_ip() {
+    local version=$1
+    local ip=""
+    
+    # 尝试源 1: ip.sb (带 User-Agent 伪装)
+    ip=$(curl -s -"$version" --max-time 2 --user-agent "Mozilla/5.0" https://api.ip.sb/ip 2>/dev/null)
+    
+    # 验证是否为合法 IP (简单正则)
+    if [[ ! "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
+        # 尝试源 2: icanhazip
+        ip=$(curl -s -"$version" --max-time 2 https://icanhazip.com 2>/dev/null)
+    fi
+    
+    # 再次验证，如果还是失败，尝试本地获取
+    if [[ ! "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
+        if [ "$version" == "4" ]; then
+            ip=$(hostname -I | awk '{print $1}')
+        else
+            ip=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n1)
+        fi
+    fi
+    
+    # 最终兜底
+    if [ -z "$ip" ] || [[ "$ip" == *"html"* ]]; then
+        echo "未检测到"
+    else
+        echo "$ip"
+    fi
+}
+
+# 🌐 初始化：获取网络信息 (静默模式，防止报错刷屏)
+echo -e "${YELLOW}正在探测网络配置...${NC}"
+IPV4=$(get_public_ip 4)
+IPV6=$(get_public_ip 6)
+
 # 🔧 首次运行自动安装快捷命令
 SCRIPT_PATH="$(readlink -f "$0")"
 if [ ! -f ~/.nb_installed ] && [ "$1" != "--skip-install" ]; then
     clear
-    echo -e "${CYAN}╔════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║   🔧 检测到首次运行，正在配置快捷命令...      ║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════════════╝${NC}"
-    echo ""
-    
-    # 保存脚本到固定位置
-    echo -e "${YELLOW}📦 复制脚本到系统目录...${NC}"
     mkdir -p /opt/scripts
     cp "$SCRIPT_PATH" /opt/scripts/nb.sh
     chmod +x /opt/scripts/nb.sh
-    
-    # 添加别名到 .bashrc
-    echo -e "${YELLOW}⚙️  配置快捷命令...${NC}"
     if ! grep -q "alias nb=" ~/.bashrc 2>/dev/null; then
-        echo "" >> ~/.bashrc
-        echo "# =============================================" >> ~/.bashrc
-        echo "# 运维管理系统快捷命令 (自动生成)" >> ~/.bashrc
-        echo "# =============================================" >> ~/.bashrc
         echo "alias nb='bash /opt/scripts/nb.sh'" >> ~/.bashrc
     fi
-    
-    # 标记已安装
     touch ~/.nb_installed
-    
-    echo ""
-    echo -e "${GREEN}✅ 快捷命令安装完成！${NC}"
-    echo -e "${CYAN}┌────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│  使用方法：                                │${NC}"
-    echo -e "${CYAN}│  1️⃣  执行以下命令使快捷方式生效：          │${NC}"
-    echo -e "${CYAN}│     ${YELLOW}source ~/.bashrc${CYAN}                        │${NC}"
-    echo -e "${CYAN}│                                            │${NC}"
-    echo -e "${CYAN}│  2️⃣  之后直接输入 ${YELLOW}nb${CYAN} 即可启动脚本        │${NC}"
-    echo -e "${CYAN}└────────────────────────────────────────────┘${NC}"
-    echo ""
-    echo -e "${BLUE}💡 提示：脚本已保存到 /opt/scripts/nb.sh${NC}"
-    echo ""
-    read -p "按回车键继续进入主菜单..." dummy
 fi
+
+# 获取实时内存使用情况
+get_memory_usage() {
+    free -m | awk 'NR==2{printf "%s/%sMB (%.0f%%)", $3,$2,$3*100/$2 }'
+}
+
+# 统一页头显示
+show_header() {
+    local title="$1"
+    clear
+    echo -e "${BLUE}==============================================================${NC}"
+    echo -e " 🚀 运维集成系统 ${YELLOW}[V5.9]${NC} | ${CYAN}$title${NC}"
+    echo -e "${BLUE}==============================================================${NC}"
+    echo -e " 🖥️  IPv4: ${PURPLE}$IPV4${NC}"
+    echo -e " 🌐 IPv6: ${PURPLE}$IPV6${NC}"
+    echo -e " 💾 内存: $(get_memory_usage)"
+    echo -e "${BLUE}--------------------------------------------------------------${NC}"
+}
 
 # --- 1. 状态感知核心函数 ---
 
-# 检查 Docker 服务状态 🐳
 get_docker_service_status() {
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}[ 未安装 ]${NC}"
-    elif systemctl is-active --quiet docker; then
-        echo -e "${GREEN}[ 运行中 ]${NC}"
-    else
-        echo -e "${RED}[ 已停止 ]${NC}"
-    fi
+    if ! command -v docker &> /dev/null; then echo -e "${RED}[ 未安装 ]${NC}";
+    elif systemctl is-active --quiet docker; then echo -e "${GREEN}[ 运行中 ]${NC}";
+    else echo -e "${RED}[ 已停止 ]${NC}"; fi
 }
 
-# 检查指定容器状态 📦
 get_container_status() {
     local status=$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null)
     case "$status" in
@@ -98,14 +119,10 @@ install_docker() {
 deploy_caddy() {
     echo -e "${YELLOW}正在部署 Caddy...${NC}"
     mkdir -p /data/stacks/caddy /data/logs/caddy
-    cat > /data/stacks/caddy/Caddyfile <<'EOF'
-{
-    email admin@example.com
-}
-:80 {
-    respond /health "OK" 200
-}
-EOF
+    if [ ! -f /data/stacks/caddy/Caddyfile ]; then
+        echo "{ email admin@example.com }" > /data/stacks/caddy/Caddyfile
+        echo ":80 { respond /health \"OK\" 200 }" >> /data/stacks/caddy/Caddyfile
+    fi
     cat > /data/stacks/caddy/compose.yaml <<'EOF'
 services:
   caddy:
@@ -150,154 +167,110 @@ services:
       - DOCKGE_STACKS_DIR=/opt/stacks
 EOF
     ( cd /data/stacks/dockge && docker compose up -d )
-    echo -e "${GREEN}✅ Dockge 部署成功，访问地址: http://your-server-ip:5001${NC}"
+    echo -e "${GREEN}✅ Dockge 部署成功${NC}"
+}
+
+add_caddy_proxy() {
+    local caddyfile="/data/stacks/caddy/Caddyfile"
+    if [ ! -f "$caddyfile" ]; then echo -e "${RED}❌ Caddy 未部署${NC}"; return; fi
+
+    echo -e "${CYAN}--- 新增反向代理 (简易模式) ---${NC}"
+    read -p "1️⃣  请输入域名 (例如: blog.test.com): " domain
+    [ -z "$domain" ] && return
+    read -p "2️⃣  请输入目标 IP:端口 (例如: 127.0.0.1:8080): " target
+    [ -z "$target" ] && return
+
+    echo ""
+    echo -e "添加: ${GREEN}$domain${NC} ➡️  ${GREEN}$target${NC}"
+    read -p "确认? (y/n): " confirm
+    if [[ "$confirm" == "y" ]]; then
+        echo -e "\n# --- Proxy: $domain ---\n$domain {\n    reverse_proxy $target\n}" >> "$caddyfile"
+        docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+        echo -e "${GREEN}✅ 配置已生效${NC}"
+    fi
 }
 
 # --- 3. 管理子菜单 ---
 
-# Docker 子菜单 🐳
 manage_docker_menu() {
     while true; do
-        clear
-        echo -e "${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${CYAN}┃        🐳 Docker 基础环境管理          ┃${NC}"
-        echo -e "${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
-        echo -e "当前状态: $(get_docker_service_status)"
-        echo -e "------------------------------------------"
+        show_header "Docker 管理"
+        echo -e " Docker状态: $(get_docker_service_status)"
+        echo -e "--------------------------------------------------------------"
         echo -e " 1. 安装 Docker"
         echo -e " 2. 启动服务"
         echo -e " 3. 停止服务"
-        echo -e " 4. 彻底卸载并清理残留"
+        echo -e " 4. 彻底卸载 Docker"
         echo -e " 0. 返回主菜单"
-        echo -e "------------------------------------------"
-        read -p "选择操作 [0-4]: " d_choice
-        case $d_choice in
+        echo -e "--------------------------------------------------------------"
+        read -p "选择操作 [0-4]: " choice
+        case $choice in
             1) install_docker ;;
-            2) systemctl start docker && echo -e "${GREEN}✅ 服务已启动${NC}" ;;
-            3) systemctl stop docker && echo -e "${YELLOW}⚠️  服务已停止${NC}" ;;
+            2) systemctl start docker && echo -e "${GREEN}✅ 已启动${NC}" ;;
+            3) systemctl stop docker && echo -e "${YELLOW}⚠️  已停止${NC}" ;;
             4) 
-                read -p "⚠️  确定卸载 Docker？所有容器和数据将被删除 (y/n): " confirm
-                if [[ "$confirm" == "y" ]]; then
-                    docker stop $(docker ps -aq) 2>/dev/null
-                    apt-get purge -y docker-ce docker-ce-cli containerd.io 2>/dev/null
-                    rm -rf /var/lib/docker
-                    echo -e "${GREEN}✅ 卸载完成${NC}"
-                fi
+                read -p "⚠️  确认卸载? (y/n): " cf
+                [[ "$cf" == "y" ]] && apt-get purge -y docker-ce docker-ce-cli containerd.io && rm -rf /var/lib/docker && echo -e "${GREEN}✅ 已卸载${NC}" 
                 ;;
             0) break ;;
         esac
-        read -p "按回车键继续..." dummy
+        read -p "按回车键继续..."
     done
 }
 
-# Caddy 子菜单 🌐
 manage_caddy_menu() {
     while true; do
-        clear
-        echo -e "${PURPLE}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${PURPLE}┃        🌐 Caddy 智能网关控制           ┃${NC}"
-        echo -e "${PURPLE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
-        echo -e "当前状态: $(get_container_status caddy)"
-        echo -e "------------------------------------------"
-        echo -e " 1. 部署 / 重置 Caddy"
+        show_header "Caddy 网关"
+        echo -e " 容器状态: $(get_container_status caddy)"
+        echo -e "--------------------------------------------------------------"
+        echo -e " 1. 部署/重置 Caddy"
         echo -e " 2. 启动容器"
         echo -e " 3. 停止容器"
-        echo -e " 4. 暂停 (Pause) / 取消暂停"
-        echo -e " 5. 编辑配置 (Nano)"
+        echo -e "${CYAN} 4. 新增反向代理 (向导)${NC}"
+        echo -e " 5. 编辑配置文件 (Nano)"
         echo -e " 6. 重载配置 (Reload)"
-        echo -e " 33. 彻底卸载 Caddy"
+        echo -e " 33. 卸载 Caddy"
         echo -e " 0. 返回主菜单"
-        echo -e "------------------------------------------"
-        read -p "选择操作 [0-33]: " c_choice
-        case $c_choice in
+        echo -e "--------------------------------------------------------------"
+        read -p "选择操作 [0-33]: " choice
+        case $choice in
             1) deploy_caddy ;;
-            2) docker start caddy && echo -e "${GREEN}✅ 容器已启动${NC}" ;;
-            3) docker stop caddy && echo -e "${YELLOW}⚠️  容器已停止${NC}" ;;
-            4) 
-                if [ "$(docker inspect -f '{{.State.Paused}}' caddy 2>/dev/null)" == "true" ]; then
-                    docker unpause caddy && echo -e "${GREEN}✅ 已取消暂停${NC}"
-                else
-                    docker pause caddy 2>/dev/null && echo -e "${YELLOW}⏸  已暂停${NC}" || echo -e "${RED}❌ 容器未运行${NC}"
-                fi
-                ;;
+            2) docker start caddy && echo -e "${GREEN}✅ 已启动${NC}" ;;
+            3) docker stop caddy && echo -e "${YELLOW}⚠️  已停止${NC}" ;;
+            4) add_caddy_proxy ;;
             5) nano /data/stacks/caddy/Caddyfile ;;
-            6) 
-                docker exec caddy caddy reload --config /etc/caddy/Caddyfile
-                [ $? -eq 0 ] && echo -e "${GREEN}✅ 重载成功${NC}" || echo -e "${RED}❌ 重载失败${NC}"
-                ;;
-            33) 
-                read -p "⚠️  确定卸载 Caddy？(y/n): " confirm
-                if [[ "$confirm" == "y" ]]; then
-                    ( cd /data/stacks/caddy && docker compose down -v ) 
-                    rm -rf /data/stacks/caddy
-                    echo -e "${GREEN}✅ 卸载完成${NC}"
-                fi
-                ;;
+            6) docker exec caddy caddy reload --config /etc/caddy/Caddyfile && echo -e "${GREEN}✅ 重载成功${NC}" ;;
+            33) [[ "$(read -p "确认卸载? (y/n): " c; echo $c)" == "y" ]] && (cd /data/stacks/caddy && docker compose down -v) && rm -rf /data/stacks/caddy && echo -e "${GREEN}✅ 已卸载${NC}" ;;
             0) break ;;
         esac
-        read -p "按回车键继续..." dummy
+        read -p "按回车键继续..."
     done
 }
 
-# --- 4. 卸载脚本函数 ---
-
 uninstall_script() {
-    clear
-    echo -e "${RED}╔════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║   ⚠️  卸载脚本并清理所有配置                  ║${NC}"
-    echo -e "${RED}╚════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}此操作将删除脚本文件及相关配置${NC}"
-    echo ""
-    echo -e "${CYAN}💡 注意：此操作不会删除 Docker、Caddy 等已部署的服务${NC}"
-    echo ""
-    read -p "确定要卸载脚本吗？(输入 yes 确认): " confirm
-    
-    if [[ "$confirm" == "yes" ]]; then
-        echo ""
-        echo -e "${YELLOW}🧹 正在卸载...${NC}"
-        
-        # 删除系统脚本
+    read -p "确定要卸载脚本吗？(y/n): " confirm
+    if [[ "$confirm" == "y" ]]; then
         rm -f /opt/scripts/nb.sh
-        
-        # 删除 .bashrc 中的配置
-        sed -i '/# =============================================/d' ~/.bashrc
-        sed -i '/# 运维管理系统快捷命令 (自动生成)/d' ~/.bashrc
-        sed -i "/alias nb=/d" ~/.bashrc
-        
-        # 删除安装标记
+        sed -i '/alias nb=/d' ~/.bashrc
         rm -f ~/.nb_installed
-        
-        echo -e "${GREEN}✅ 卸载完成！${NC}"
-        echo -e "${YELLOW}请执行: source ~/.bashrc${NC}"
-        
-        # 删除当前脚本文件
+        echo -e "${GREEN}✅ 脚本已卸载${NC}"
         rm -f "$0"
-        
         exit 0
-    else
-        echo -e "${CYAN}❌ 已取消卸载${NC}"
-        read -p "按回车键继续..." dummy
     fi
 }
 
-# --- 5. 主菜单循环 ---
+# --- 4. 主菜单循环 ---
 
 while true; do
-    clear
-    echo -e "${BLUE}======================================================${NC}"
-    echo -e "          🚀 服务器运维集成管理系统 (V5.5)"
-    echo -e "${BLUE}======================================================${NC}"
-    printf "  %-25s %-20s\n" "项目名称" "实时运行状态"
-    echo -e "  ----------------------------------------------------"
-    printf "  %-20s %-20b\n" "1. Docker 基础环境" "$(get_docker_service_status)"
-    printf "  %-20s %-20b\n" "2. Dockge 管理面板" "$(get_container_status dockge)"
-    printf "  %-20s %-20b\n" "3. Caddy 反代网关"  "$(get_container_status caddy)"
-    echo -e "  ----------------------------------------------------"
-    echo -e "  00. 🗑️  卸载脚本并清理配置"
-    echo -e "  0. 退出脚本"
+    show_header "主菜单"
+    printf " %-20s %-20b\n" "1. Docker 环境" "$(get_docker_service_status)"
+    printf " %-20s %-20b\n" "2. Dockge 面板" "$(get_container_status dockge)"
+    printf " %-20s %-20b\n" "3. Caddy 网关"  "$(get_container_status caddy)"
+    echo -e "--------------------------------------------------------------"
+    echo -e " 00. 卸载脚本"
+    echo -e " 0. 退出"
     echo ""
-    read -p "请输入指令 [0-3,00]: " main_choice
+    read -p "请输入指令: " main_choice
 
     case $main_choice in
         00) uninstall_script ;;
@@ -305,24 +278,20 @@ while true; do
         2) 
             if [ "$(docker ps -a -q -f name=dockge)" ]; then
                 echo -e "${YELLOW}Dockge 已部署${NC}"
-                read -p "按回车键继续..." dummy
+                read -p "按回车..."
             else
                 deploy_dockge
-                read -p "按回车键继续..." dummy
+                read -p "按回车..."
             fi
             ;;
         3) manage_caddy_menu ;;
         0) break ;;
-        *) 
-            echo -e "${RED}❌ 无效选项${NC}"
-            read -p "按回车键继续..." dummy
-            ;;
+        *) echo -e "${RED}无效选项${NC}"; read -p "按回车..." ;;
     esac
 done
 
 cd /root
-echo -e "${GREEN}✅ 已安全退出并回到 /root 目录。${NC}"
----
+echo -e "${GREEN}✅ 已退出。${NC}"
 ```
 ## 🤖 3. AI 提示词
 
