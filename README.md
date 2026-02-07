@@ -32,7 +32,7 @@
 - 系统需要能够访问互联网（用于下载 Docker）
 
 
-### 系统初始化，常用安装环境
+### 系统初始化，更新/安装软件包
 ```bash
 apt update
 apt install curl -y
