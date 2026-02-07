@@ -6,7 +6,7 @@ caddy（一键反代）
 #!/bin/bash
 
 # =================================================================
-# 🚀 服务器运维集成管理系统 (V5.9 - 修复 IP 显示 Bug 版)
+# 🚀 服务器运维集成管理系统 (V6.0 - 增强交互版)
 # =================================================================
 
 # 🎨 颜色定义
@@ -18,24 +18,16 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# --- 0. 基础工具函数 (提前定义) ---
+# --- 0. 基础工具函数 ---
 
-# 🛡️ 核心修复：IP 获取与清洗函数
-# 参数 1: IPv4 或 IPv6 (4/6)
+# 🛡️ IP 获取函数
 get_public_ip() {
     local version=$1
     local ip=""
-    
-    # 尝试源 1: ip.sb (带 User-Agent 伪装)
     ip=$(curl -s -"$version" --max-time 2 --user-agent "Mozilla/5.0" https://api.ip.sb/ip 2>/dev/null)
-    
-    # 验证是否为合法 IP (简单正则)
     if [[ ! "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
-        # 尝试源 2: icanhazip
         ip=$(curl -s -"$version" --max-time 2 https://icanhazip.com 2>/dev/null)
     fi
-    
-    # 再次验证，如果还是失败，尝试本地获取
     if [[ ! "$ip" =~ ^[0-9a-fA-F:.]+$ ]]; then
         if [ "$version" == "4" ]; then
             ip=$(hostname -I | awk '{print $1}')
@@ -43,16 +35,10 @@ get_public_ip() {
             ip=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n1)
         fi
     fi
-    
-    # 最终兜底
-    if [ -z "$ip" ] || [[ "$ip" == *"html"* ]]; then
-        echo "未检测到"
-    else
-        echo "$ip"
-    fi
+    if [ -z "$ip" ] || [[ "$ip" == *"html"* ]]; then echo "未检测到"; else echo "$ip"; fi
 }
 
-# 🌐 初始化：获取网络信息 (静默模式，防止报错刷屏)
+# 🌐 初始化：获取网络信息
 echo -e "${YELLOW}正在探测网络配置...${NC}"
 IPV4=$(get_public_ip 4)
 IPV6=$(get_public_ip 6)
@@ -60,7 +46,6 @@ IPV6=$(get_public_ip 6)
 # 🔧 首次运行自动安装快捷命令
 SCRIPT_PATH="$(readlink -f "$0")"
 if [ ! -f ~/.nb_installed ] && [ "$1" != "--skip-install" ]; then
-    clear
     mkdir -p /opt/scripts
     cp "$SCRIPT_PATH" /opt/scripts/nb.sh
     chmod +x /opt/scripts/nb.sh
@@ -70,9 +55,23 @@ if [ ! -f ~/.nb_installed ] && [ "$1" != "--skip-install" ]; then
     touch ~/.nb_installed
 fi
 
-# 获取实时内存使用情况
+# 获取内存
 get_memory_usage() {
     free -m | awk 'NR==2{printf "%s/%sMB (%.0f%%)", $3,$2,$3*100/$2 }'
+}
+
+# --- 💡 新增：动态显示访问地址函数 ---
+# 参数1: 端口号
+show_access_info() {
+    local port=$1
+    echo -e "${BLUE}--------------------------------------------------------------${NC}"
+    echo -e " 🔗 访问入口:"
+    if [ "$IPV4" != "未检测到" ]; then
+        echo -e "    IPv4: ${CYAN}http://${IPV4}:${port}${NC}"
+    fi
+    if [ "$IPV6" != "未检测到" ]; then
+        echo -e "    IPv6: ${CYAN}http://[${IPV6}]:${port}${NC}"
+    fi
 }
 
 # 统一页头显示
@@ -80,7 +79,7 @@ show_header() {
     local title="$1"
     clear
     echo -e "${BLUE}==============================================================${NC}"
-    echo -e " 🚀 运维集成系统 ${YELLOW}[V5.9]${NC} | ${CYAN}$title${NC}"
+    echo -e " 🚀 运维集成系统 ${YELLOW}[V6.0]${NC} | ${CYAN}$title${NC}"
     echo -e "${BLUE}==============================================================${NC}"
     echo -e " 🖥️  IPv4: ${PURPLE}$IPV4${NC}"
     echo -e " 🌐 IPv6: ${PURPLE}$IPV6${NC}"
@@ -196,19 +195,24 @@ manage_docker_menu() {
     while true; do
         show_header "Docker 管理"
         echo -e " Docker状态: $(get_docker_service_status)"
+        if command -v docker &> /dev/null; then
+            echo -e " 版本信息: $(docker --version | cut -d ',' -f1)"
+        fi
         echo -e "--------------------------------------------------------------"
         echo -e " 1. 安装 Docker"
         echo -e " 2. 启动服务"
         echo -e " 3. 停止服务"
-        echo -e " 4. 彻底卸载 Docker"
+        echo -e " 4. 查看所有容器 (ps -a)"
+        echo -e " 5. 彻底卸载 Docker"
         echo -e " 0. 返回主菜单"
         echo -e "--------------------------------------------------------------"
-        read -p "选择操作 [0-4]: " choice
+        read -p "选择操作 [0-5]: " choice
         case $choice in
             1) install_docker ;;
             2) systemctl start docker && echo -e "${GREEN}✅ 已启动${NC}" ;;
             3) systemctl stop docker && echo -e "${YELLOW}⚠️  已停止${NC}" ;;
-            4) 
+            4) docker ps -a ;;
+            5) 
                 read -p "⚠️  确认卸载? (y/n): " cf
                 [[ "$cf" == "y" ]] && apt-get purge -y docker-ce docker-ce-cli containerd.io && rm -rf /var/lib/docker && echo -e "${GREEN}✅ 已卸载${NC}" 
                 ;;
@@ -218,17 +222,63 @@ manage_docker_menu() {
     done
 }
 
+# --- 🔥 新增：Dockge 独立管理菜单 ---
+manage_dockge_menu() {
+    while true; do
+        show_header "Dockge 面板管理"
+        echo -e " 容器状态: $(get_container_status dockge)"
+        
+        # 🚀 只有当容器存在时，才显示访问链接
+        if [ "$(docker ps -q -f name=dockge)" ]; then
+            show_access_info "5001"
+        fi
+
+        echo -e "--------------------------------------------------------------"
+        echo -e " 1. 部署/更新 Dockge"
+        echo -e " 2. 启动容器"
+        echo -e " 3. 暂停容器"
+        echo -e " 4. 重启容器"
+        echo -e " 5. 查看实时日志 (Ctrl+C 退出)"
+        echo -e " 33. 卸载 Dockge"
+        echo -e " 0. 返回主菜单"
+        echo -e "--------------------------------------------------------------"
+        read -p "选择操作 [0-33]: " choice
+        case $choice in
+            1) deploy_dockge ;;
+            2) docker start dockge && echo -e "${GREEN}✅ 已启动${NC}" ;;
+            3) docker stop dockge && echo -e "${YELLOW}⚠️  已停止${NC}" ;;
+            4) docker restart dockge && echo -e "${GREEN}✅ 已重启${NC}" ;;
+            5) docker logs -f --tail 100 dockge ;;
+            33) 
+                read -p "确认删除 Dockge 容器? (数据保留) (y/n): " c
+                if [[ "$c" == "y" ]]; then
+                    (cd /data/stacks/dockge && docker compose down)
+                    echo -e "${GREEN}✅ 容器已删除 (数据位于 /data/stacks/dockge)${NC}" 
+                fi
+                ;;
+            0) break ;;
+        esac
+        read -p "按回车键继续..."
+    done
+}
+
 manage_caddy_menu() {
     while true; do
-        show_header "Caddy 网关"
+        show_header "Caddy 网关管理"
         echo -e " 容器状态: $(get_container_status caddy)"
+        
+        if [ "$(docker ps -q -f name=caddy)" ]; then
+            show_access_info "80"
+        fi
+
         echo -e "--------------------------------------------------------------"
         echo -e " 1. 部署/重置 Caddy"
         echo -e " 2. 启动容器"
         echo -e " 3. 停止容器"
-        echo -e "${CYAN} 4. 新增反向代理 (向导)${NC}"
-        echo -e " 5. 编辑配置文件 (Nano)"
-        echo -e " 6. 重载配置 (Reload)"
+        echo -e " 4. 重载配置 (Reload)"
+        echo -e " 5. 查看实时日志"
+        echo -e "${CYAN} 6. 新增反向代理 (向导)${NC}"
+        echo -e " 7. 编辑配置文件 (Nano)"
         echo -e " 33. 卸载 Caddy"
         echo -e " 0. 返回主菜单"
         echo -e "--------------------------------------------------------------"
@@ -237,9 +287,10 @@ manage_caddy_menu() {
             1) deploy_caddy ;;
             2) docker start caddy && echo -e "${GREEN}✅ 已启动${NC}" ;;
             3) docker stop caddy && echo -e "${YELLOW}⚠️  已停止${NC}" ;;
-            4) add_caddy_proxy ;;
-            5) nano /data/stacks/caddy/Caddyfile ;;
-            6) docker exec caddy caddy reload --config /etc/caddy/Caddyfile && echo -e "${GREEN}✅ 重载成功${NC}" ;;
+            4) docker exec caddy caddy reload --config /etc/caddy/Caddyfile && echo -e "${GREEN}✅ 重载成功${NC}" ;;
+            5) docker logs -f --tail 50 caddy ;;
+            6) add_caddy_proxy ;;
+            7) nano /data/stacks/caddy/Caddyfile ;;
             33) [[ "$(read -p "确认卸载? (y/n): " c; echo $c)" == "y" ]] && (cd /data/stacks/caddy && docker compose down -v) && rm -rf /data/stacks/caddy && echo -e "${GREEN}✅ 已卸载${NC}" ;;
             0) break ;;
         esac
@@ -275,15 +326,7 @@ while true; do
     case $main_choice in
         00) uninstall_script ;;
         1) manage_docker_menu ;;
-        2) 
-            if [ "$(docker ps -a -q -f name=dockge)" ]; then
-                echo -e "${YELLOW}Dockge 已部署${NC}"
-                read -p "按回车..."
-            else
-                deploy_dockge
-                read -p "按回车..."
-            fi
-            ;;
+        2) manage_dockge_menu ;; 
         3) manage_caddy_menu ;;
         0) break ;;
         *) echo -e "${RED}无效选项${NC}"; read -p "按回车..." ;;
