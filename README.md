@@ -31,6 +31,12 @@
 - 需要 root 或具有 sudo 权限的用户执行
 - 系统需要能够访问互联网（用于下载 Docker）
 
+
+### 系统初始化，常用安装环境
+```bash
+apt update
+apt install curl -y
+```
 ### 初始化脚本
 
 ```bash
