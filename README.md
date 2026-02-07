@@ -2,137 +2,138 @@
 dockge（docker 项目管理）
 caddy（一键反代）
 - - - 
-## 1.系统初始化
-### 1.1 更新/安装软件包
-```bash
-apt update
-apt install curl -y
-```
-### 1.2安装 Docker
-```bash
 #!/bin/bash
 
 # =================================================================
-# 脚本名称: Docker 环境全自动严谨初始化工具
-# 适用系统: Debian 12 (Bookworm)
+# 🚀 服务器运维集成管理系统 (标准化 V5.5)
 # =================================================================
 
-# 设置颜色变量
-GREEN='\033[0;32m'
+# 🎨 颜色定义
 RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-# 1. 环境预检
-echo -e "${GREEN}🔍 正在进行系统环境检查...${NC}"
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}错误: 请使用 root 用户或 sudo 运行此脚本。${NC}"
-    exit 1
+# 🔧 首次运行自动安装快捷命令
+SCRIPT_PATH="$(readlink -f "$0")"
+if [ ! -f ~/.nb_installed ] && [ "$1" != "--skip-install" ]; then
+    clear
+    echo -e "${CYAN}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║   🔧 检测到首次运行，正在配置快捷命令...      ║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # 保存脚本到固定位置
+    echo -e "${YELLOW}📦 复制脚本到系统目录...${NC}"
+    mkdir -p /opt/scripts
+    cp "$SCRIPT_PATH" /opt/scripts/nb.sh
+    chmod +x /opt/scripts/nb.sh
+    
+    # 添加别名到 .bashrc
+    echo -e "${YELLOW}⚙️  配置快捷命令...${NC}"
+    if ! grep -q "alias nb=" ~/.bashrc 2>/dev/null; then
+        echo "" >> ~/.bashrc
+        echo "# =============================================" >> ~/.bashrc
+        echo "# 运维管理系统快捷命令 (自动生成)" >> ~/.bashrc
+        echo "# =============================================" >> ~/.bashrc
+        echo "alias nb='bash /opt/scripts/nb.sh'" >> ~/.bashrc
+    fi
+    
+    # 标记已安装
+    touch ~/.nb_installed
+    
+    echo ""
+    echo -e "${GREEN}✅ 快捷命令安装完成！${NC}"
+    echo -e "${CYAN}┌────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│  使用方法：                                │${NC}"
+    echo -e "${CYAN}│  1️⃣  执行以下命令使快捷方式生效：          │${NC}"
+    echo -e "${CYAN}│     ${YELLOW}source ~/.bashrc${CYAN}                        │${NC}"
+    echo -e "${CYAN}│                                            │${NC}"
+    echo -e "${CYAN}│  2️⃣  之后直接输入 ${YELLOW}nb${CYAN} 即可启动脚本        │${NC}"
+    echo -e "${CYAN}└────────────────────────────────────────────┘${NC}"
+    echo ""
+    echo -e "${BLUE}💡 提示：脚本已保存到 /opt/scripts/nb.sh${NC}"
+    echo ""
+    read -p "按回车键继续进入主菜单..." dummy
 fi
 
-OS_CHECK=$(grep "VERSION_ID" /etc/os-release | cut -d '"' -f 2)
-if [ "$OS_CHECK" != "12" ]; then
-    echo -e "${RED}警告: 此脚本针对 Debian 12 优化，检测到您的版本为 $OS_CHECK，可能存在兼容性问题。${NC}"
-fi
+# --- 1. 状态感知核心函数 ---
 
-# 2. 安装源选择
-echo -e "${GREEN}请选择安装环境：${NC}"
-echo "1) 国外服务器 (官方原版源 - 适合海外机型)"
-echo "2) 国内服务器 (阿里云镜像源 - 适合深圳/杭州等国内机型)"
-echo "3) 自定义脚本地址"
-read -p "请输入数字 [1/2/3, 默认 1]: " source_choice
-source_choice=${source_choice:-1}
+# 检查 Docker 服务状态 🐳
+get_docker_service_status() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${RED}[ 未安装 ]${NC}"
+    elif systemctl is-active --quiet docker; then
+        echo -e "${GREEN}[ 运行中 ]${NC}"
+    else
+        echo -e "${RED}[ 已停止 ]${NC}"
+    fi
+}
 
-# 3. 清理残留
-rm -f get-docker.sh
+# 检查指定容器状态 📦
+get_container_status() {
+    local status=$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null)
+    case "$status" in
+        running) echo -e "${GREEN}[ 运行中 ]${NC}" ;;
+        paused)  echo -e "${YELLOW}[ 已暂停 ]${NC}" ;;
+        exited)  echo -e "${RED}[ 已停止 ]${NC}" ;;
+        *)       echo -e "${RED}[ 未部署 ]${NC}" ;;
+    esac
+}
 
-# 4. 执行安装逻辑
-if ! command -v docker &> /dev/null; then
-    case $source_choice in
-        1)
-            echo -e "${GREEN}🚀 正在通过官方源安装 Docker...${NC}"
-            curl -fsSL https://get.docker.com | sh
-            ;;
-        2)
-            echo -e "${GREEN}🚀 正在配置国内镜像站并安装 (完全绕过官方域名)...${NC}"
-            apt-get update && apt-get install -y ca-certificates curl gnupg lsb-release
-            # 配置 GPG 密钥
-            install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
-            # 配置软件源
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-            apt-get update
-            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            
-            # 配置 Docker Hub 国内加速器
-            echo -e "${GREEN}🛠️ 正在配置镜像加速器...${NC}"
-            mkdir -p /etc/docker
-            cat > /etc/docker/daemon.json <<EOF
+# --- 2. 部署函数 ---
+
+install_docker() {
+    echo -e "${YELLOW}正在安装 Docker 环境...${NC}"
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker
+    docker network create proxynet 2>/dev/null || true
+    echo -e "${GREEN}✅ 安装完成${NC}"
+}
+
+deploy_caddy() {
+    echo -e "${YELLOW}正在部署 Caddy...${NC}"
+    mkdir -p /data/stacks/caddy /data/logs/caddy
+    cat > /data/stacks/caddy/Caddyfile <<'EOF'
 {
-  "registry-mirrors": [
-    "https://mirror.iscas.ac.cn",
-    "https://mirror.baidubce.com",
-    "https://docker.m.daocloud.io"
-  ]
+    email admin@example.com
+}
+:80 {
+    respond /health "OK" 200
 }
 EOF
-            ;;
-        3)
-            read -p "请输入自定义 URL: " custom_url
-            curl -fsSL $custom_url | sh
-            ;;
-    esac
-    
-    systemctl enable docker
-    systemctl start docker
-else
-    echo -e "${GREEN}✓ 检测到 Docker 已安装，跳过安装步骤。${NC}"
-fi
+    cat > /data/stacks/caddy/compose.yaml <<'EOF'
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./data:/data
+      - ./config:/config
+      - /data/logs/caddy:/var/log/caddy
+    networks:
+      - proxynet
+networks:
+  proxynet:
+    external: true
+EOF
+    ( cd /data/stacks/caddy && docker compose up -d )
+    echo -e "${GREEN}✅ Caddy 部署成功${NC}"
+}
 
-# 5. 原有目录与权限逻辑 (保持严谨性)
-echo -e "${GREEN}🌐 配置 Docker 网络...${NC}"
-docker network create proxynet 2>/dev/null || echo "✓ 网络已存在"
-
-echo -e "${GREEN}📁 初始化目录结构 /data...${NC}"
-mkdir -p /data/{stacks,shared/{media,downloads,backups},scripts,logs}
-
-echo -e "${GREEN}🔐 配置权限模型 (PUID/PGID: 1000)...${NC}"
-chown -R 1000:1000 /data
-chmod 750 /data
-chmod -R u+rwX,g+rX,o-rwx /data
-
-echo -e "${GREEN}📝 写入环境配置文件...${NC}"
-cat > /data/.env << 'ENVEOF'
-# Generated by Setup Script
-PUID=1000
-PGID=1000
-TZ=Asia/Shanghai
-ENVEOF
-
-# 6. 最终信息展示
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}✅ 系统初始化成功！${NC}"
-echo -e "Docker 版本: $(docker --version)"
-echo -e "存储目录: /data"
-echo -e "可用空间: $(df -h /data | tail -1 | awk '{print $4}')"
-if [ "$source_choice" == "2" ]; then
-    echo -e "镜像加速: 已启用 (中科院/百度/DaoCloud)"
-fi
-echo -e "${GREEN}========================================${NC}"
-```
----
-
-## 🚀 2. 核心服务部署
-
-### 2.1 部署 Dockge（管理面板）
-
-**访问地址**：`http://<服务器IP>:5001`
-
-```bash
-# 复制整段执行：部署 Dockge
-mkdir -p /data/stacks/dockge && cd /data/stacks/dockge
-
-cat > compose.yaml << 'EOF'
+deploy_dockge() {
+    echo -e "${YELLOW}正在部署 Dockge...${NC}"
+    mkdir -p /data/stacks/dockge /data/stacks
+    cat > /data/stacks/dockge/compose.yaml <<'EOF'
 services:
   dockge:
     image: louislam/dockge:1
@@ -143,299 +144,183 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data:/app/data
-      - /data/stacks:/data/stacks
+      - /data/stacks:/opt/stacks
     environment:
-      - DOCKGE_STACKS_DIR=/data/stacks
-      - TZ=Asia/Shanghai
-    networks:
-      - proxynet
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
-networks:
-  proxynet:
-    external: true
+      - DOCKGE_STACKS_DIR=/opt/stacks
 EOF
-
-docker compose up -d
-
-echo ""
-echo "✅ Dockge 已启动"
-echo "📍 访问地址: http://$(hostname -I | awk '{print $1}'):5001"
-echo "🔑 首次访问需要设置管理员账号"
-```
-
-### 2.2 部署 Caddy（反向代理网关）
-
-```bash
-# 复制整段执行：部署 Caddy
-mkdir -p /data/stacks/caddy && cd /data/stacks/caddy
-
-# 创建初始 Caddyfile
-cat > Caddyfile << 'EOF'
-# Caddy 全局配置
-{
-    email admin@example.com
-    admin off
+    ( cd /data/stacks/dockge && docker compose up -d )
+    echo -e "${GREEN}✅ Dockge 部署成功，访问地址: http://your-server-ip:5001${NC}"
 }
 
-# 示例：Dockge 反向代理（需要配置域名 DNS）
-# dockge.example.com {
-#     reverse_proxy dockge:5001
-# }
+# --- 3. 管理子菜单 ---
 
-# 健康检查端点
-:80 {
-    respond /health 200
-}
-EOF
-
-cat > compose.yaml << 'EOF'
-services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"  # HTTP/3 支持
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ./data:/data
-      - ./config:/config
-      - /data/logs/caddy:/var/log/caddy
-    environment:
-      - TZ=Asia/Shanghai
-    networks:
-      - proxynet
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
-networks:
-  proxynet:
-    external: true
-EOF
-
-docker compose up -d
-
-echo ""
-echo "✅ Caddy 网关已就绪"
-echo "📝 配置文件: /data/stacks/caddy/Caddyfile"
-echo "🔍 测试命令: curl http://localhost/health"
-```
-
-### 2.2.1 Caddy的一键脚本
-```bash
-# 一键部署 Caddy 管理快捷命令
-cat > /usr/local/bin/caddy << 'EOF'
-#!/bin/bash
-
-# Caddy 管理脚本
-# 工作目录
-CADDY_DIR="/data/stacks/caddy"
-CADDYFILE="$CADDY_DIR/Caddyfile"
-
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 检查是否在正确的目录
-check_dir() {
-    if [ ! -d "$CADDY_DIR" ]; then
-        echo -e "${RED}错误: Caddy 目录不存在 ($CADDY_DIR)${NC}"
-        exit 1
-    fi
-}
-
-# 显示菜单
-show_menu() {
-    clear
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}       Caddy 管理工具${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    echo ""
-    echo -e "${GREEN}1.${NC} 启动 Caddy"
-    echo -e "${GREEN}2.${NC} 关闭 Caddy"
-    echo -e "${GREEN}3.${NC} 编辑配置文件"
-    echo -e "${GREEN}4.${NC} 重载配置"
-    echo -e "${GREEN}5.${NC} 重启 Caddy"
-    echo -e "${GREEN}6.${NC} 查看状态"
-    echo -e "${GREEN}7.${NC} 查看日志"
-    echo -e "${GREEN}8.${NC} 测试配置"
-    echo -e "${GREEN}0.${NC} 退出"
-    echo ""
-    echo -e "${BLUE}========================================${NC}"
-}
-
-# 启动 Caddy
-start_caddy() {
-    echo -e "${YELLOW}正在启动 Caddy...${NC}"
-    cd $CADDY_DIR
-    docker compose up -d
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Caddy 启动成功${NC}"
-    else
-        echo -e "${RED}❌ Caddy 启动失败${NC}"
-    fi
-}
-
-# 关闭 Caddy
-stop_caddy() {
-    echo -e "${YELLOW}正在关闭 Caddy...${NC}"
-    cd $CADDY_DIR
-    docker compose down
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Caddy 已关闭${NC}"
-    else
-        echo -e "${RED}❌ Caddy 关闭失败${NC}"
-    fi
-}
-
-# 编辑配置文件
-edit_config() {
-    echo -e "${YELLOW}打开配置文件编辑器...${NC}"
-    echo -e "${BLUE}配置文件路径: $CADDYFILE${NC}"
-    echo ""
-    echo -e "${YELLOW}提示：${NC}"
-    
-    # 优先使用 nano (最简单)，其次 vim, vi
-    if command -v nano &> /dev/null; then
-        echo -e "${GREEN}使用 nano 编辑器 (Ctrl+O 保存, Ctrl+X 退出)${NC}"
-        sleep 1
-        nano $CADDYFILE
-    elif command -v vim &> /dev/null; then
-        echo -e "${GREEN}使用 vim 编辑器${NC}"
-        echo -e "${BLUE}基本操作: 按 i 进入编辑模式, 编辑完成后按 ESC, 然后输入 :wq 保存退出${NC}"
-        sleep 2
-        vim $CADDYFILE
-    elif command -v vi &> /dev/null; then
-        echo -e "${GREEN}使用 vi 编辑器${NC}"
-        echo -e "${BLUE}基本操作: 按 i 进入编辑模式, 编辑完成后按 ESC, 然后输入 :wq 保存退出${NC}"
-        sleep 2
-        vi $CADDYFILE
-    elif [ -n "$EDITOR" ]; then
-        $EDITOR $CADDYFILE
-    else
-        echo -e "${RED}❌ 未找到可用的编辑器${NC}"
-        echo -e "${YELLOW}请先安装编辑器: apt install nano 或 yum install nano${NC}"
-        return 1
-    fi
-    
-    # 编辑完成后询问是否重载
-    echo ""
-    echo -e "${YELLOW}配置文件已编辑完成${NC}"
-    read -p "是否重载 Caddy 配置？(y/n): " choice
-    case "$choice" in 
-        y|Y|yes|YES ) reload_caddy;;
-        * ) echo -e "${BLUE}已取消重载${NC}";;
-    esac
-}
-
-# 重载配置
-reload_caddy() {
-    echo -e "${YELLOW}正在重载 Caddy 配置...${NC}"
-    docker exec caddy caddy reload --config /etc/caddy/Caddyfile
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ 配置重载成功${NC}"
-    else
-        echo -e "${RED}❌ 配置重载失败${NC}"
-    fi
-}
-
-# 重启 Caddy
-restart_caddy() {
-    echo -e "${YELLOW}正在重启 Caddy...${NC}"
-    cd $CADDY_DIR
-    docker compose restart
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Caddy 重启成功${NC}"
-    else
-        echo -e "${RED}❌ Caddy 重启失败${NC}"
-    fi
-}
-
-# 查看状态
-show_status() {
-    echo -e "${BLUE}========== Caddy 状态 ==========${NC}"
-    cd $CADDY_DIR
-    docker compose ps
-    echo ""
-    echo -e "${BLUE}========== 容器详情 ==========${NC}"
-    docker inspect caddy --format='{{.State.Status}}' 2>/dev/null
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}容器运行状态: $(docker inspect caddy --format='{{.State.Status}}')${NC}"
-        echo -e "${GREEN}启动时间: $(docker inspect caddy --format='{{.State.StartedAt}}')${NC}"
-    else
-        echo -e "${RED}容器未运行${NC}"
-    fi
-}
-
-# 查看日志
-show_logs() {
-    echo -e "${YELLOW}显示 Caddy 日志 (Ctrl+C 退出)${NC}"
-    cd $CADDY_DIR
-    docker compose logs -f --tail=50
-}
-
-# 测试配置
-test_config() {
-    echo -e "${YELLOW}正在测试 Caddy 配置...${NC}"
-    docker exec caddy caddy validate --config /etc/caddy/Caddyfile
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ 配置文件语法正确${NC}"
-    else
-        echo -e "${RED}❌ 配置文件有错误${NC}"
-    fi
-}
-
-# 主循环
-main() {
-    check_dir
-    
+# Docker 子菜单 🐳
+manage_docker_menu() {
     while true; do
-        show_menu
-        read -p "请选择操作 [0-8]: " choice
-        echo ""
-        
-        case $choice in
-            1) start_caddy ;;
-            2) stop_caddy ;;
-            3) edit_config ;;
-            4) reload_caddy ;;
-            5) restart_caddy ;;
-            6) show_status ;;
-            7) show_logs ;;
-            8) test_config ;;
-            9) 
-                echo -e "${GREEN}退出 Caddy 管理工具${NC}"
-                exit 0
+        clear
+        echo -e "${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+        echo -e "${CYAN}┃        🐳 Docker 基础环境管理          ┃${NC}"
+        echo -e "${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+        echo -e "当前状态: $(get_docker_service_status)"
+        echo -e "------------------------------------------"
+        echo -e " 1. 安装 Docker"
+        echo -e " 2. 启动服务"
+        echo -e " 3. 停止服务"
+        echo -e " 4. 彻底卸载并清理残留"
+        echo -e " 0. 返回主菜单"
+        echo -e "------------------------------------------"
+        read -p "选择操作 [0-4]: " d_choice
+        case $d_choice in
+            1) install_docker ;;
+            2) systemctl start docker && echo -e "${GREEN}✅ 服务已启动${NC}" ;;
+            3) systemctl stop docker && echo -e "${YELLOW}⚠️  服务已停止${NC}" ;;
+            4) 
+                read -p "⚠️  确定卸载 Docker？所有容器和数据将被删除 (y/n): " confirm
+                if [[ "$confirm" == "y" ]]; then
+                    docker stop $(docker ps -aq) 2>/dev/null
+                    apt-get purge -y docker-ce docker-ce-cli containerd.io 2>/dev/null
+                    rm -rf /var/lib/docker
+                    echo -e "${GREEN}✅ 卸载完成${NC}"
+                fi
                 ;;
-            *)
-                echo -e "${RED}无效的选择，请重新输入${NC}"
-                ;;
+            0) break ;;
         esac
-        
-        echo ""
-        read -p "按 Enter 键继续..." dummy
+        read -p "按回车键继续..." dummy
     done
 }
 
-# 运行主程序
-main
-EOF
+# Caddy 子菜单 🌐
+manage_caddy_menu() {
+    while true; do
+        clear
+        echo -e "${PURPLE}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+        echo -e "${PURPLE}┃        🌐 Caddy 智能网关控制           ┃${NC}"
+        echo -e "${PURPLE}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+        echo -e "当前状态: $(get_container_status caddy)"
+        echo -e "------------------------------------------"
+        echo -e " 1. 部署 / 重置 Caddy"
+        echo -e " 2. 启动容器"
+        echo -e " 3. 停止容器"
+        echo -e " 4. 暂停 (Pause) / 取消暂停"
+        echo -e " 5. 编辑配置 (Nano)"
+        echo -e " 6. 重载配置 (Reload)"
+        echo -e " 33. 彻底卸载 Caddy"
+        echo -e " 0. 返回主菜单"
+        echo -e "------------------------------------------"
+        read -p "选择操作 [0-33]: " c_choice
+        case $c_choice in
+            1) deploy_caddy ;;
+            2) docker start caddy && echo -e "${GREEN}✅ 容器已启动${NC}" ;;
+            3) docker stop caddy && echo -e "${YELLOW}⚠️  容器已停止${NC}" ;;
+            4) 
+                if [ "$(docker inspect -f '{{.State.Paused}}' caddy 2>/dev/null)" == "true" ]; then
+                    docker unpause caddy && echo -e "${GREEN}✅ 已取消暂停${NC}"
+                else
+                    docker pause caddy 2>/dev/null && echo -e "${YELLOW}⏸  已暂停${NC}" || echo -e "${RED}❌ 容器未运行${NC}"
+                fi
+                ;;
+            5) nano /data/stacks/caddy/Caddyfile ;;
+            6) 
+                docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+                [ $? -eq 0 ] && echo -e "${GREEN}✅ 重载成功${NC}" || echo -e "${RED}❌ 重载失败${NC}"
+                ;;
+            33) 
+                read -p "⚠️  确定卸载 Caddy？(y/n): " confirm
+                if [[ "$confirm" == "y" ]]; then
+                    ( cd /data/stacks/caddy && docker compose down -v ) 
+                    rm -rf /data/stacks/caddy
+                    echo -e "${GREEN}✅ 卸载完成${NC}"
+                fi
+                ;;
+            0) break ;;
+        esac
+        read -p "按回车键继续..." dummy
+    done
+}
 
-chmod +x /usr/local/bin/caddy
+# --- 4. 卸载脚本函数 ---
 
-echo ""
-echo "✅ Caddy 管理命令已安装完成！"
-echo "📝 现在你可以在任何地方输入 'caddy' 来管理 Caddy 了"
-echo ""
-```
+uninstall_script() {
+    clear
+    echo -e "${RED}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║   ⚠️  卸载脚本并清理所有配置                  ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}此操作将删除脚本文件及相关配置${NC}"
+    echo ""
+    echo -e "${CYAN}💡 注意：此操作不会删除 Docker、Caddy 等已部署的服务${NC}"
+    echo ""
+    read -p "确定要卸载脚本吗？(输入 yes 确认): " confirm
+    
+    if [[ "$confirm" == "yes" ]]; then
+        echo ""
+        echo -e "${YELLOW}🧹 正在卸载...${NC}"
+        
+        # 删除系统脚本
+        rm -f /opt/scripts/nb.sh
+        
+        # 删除 .bashrc 中的配置
+        sed -i '/# =============================================/d' ~/.bashrc
+        sed -i '/# 运维管理系统快捷命令 (自动生成)/d' ~/.bashrc
+        sed -i "/alias nb=/d" ~/.bashrc
+        
+        # 删除安装标记
+        rm -f ~/.nb_installed
+        
+        echo -e "${GREEN}✅ 卸载完成！${NC}"
+        echo -e "${YELLOW}请执行: source ~/.bashrc${NC}"
+        
+        # 删除当前脚本文件
+        rm -f "$0"
+        
+        exit 0
+    else
+        echo -e "${CYAN}❌ 已取消卸载${NC}"
+        read -p "按回车键继续..." dummy
+    fi
+}
 
+# --- 5. 主菜单循环 ---
+
+while true; do
+    clear
+    echo -e "${BLUE}======================================================${NC}"
+    echo -e "          🚀 服务器运维集成管理系统 (V5.5)"
+    echo -e "${BLUE}======================================================${NC}"
+    printf "  %-25s %-20s\n" "项目名称" "实时运行状态"
+    echo -e "  ----------------------------------------------------"
+    printf "  %-20s %-20b\n" "1. Docker 基础环境" "$(get_docker_service_status)"
+    printf "  %-20s %-20b\n" "2. Dockge 管理面板" "$(get_container_status dockge)"
+    printf "  %-20s %-20b\n" "3. Caddy 反代网关"  "$(get_container_status caddy)"
+    echo -e "  ----------------------------------------------------"
+    echo -e "  00. 🗑️  卸载脚本并清理配置"
+    echo -e "  0. 退出脚本"
+    echo ""
+    read -p "请输入指令 [0-3,00]: " main_choice
+
+    case $main_choice in
+        00) uninstall_script ;;
+        1) manage_docker_menu ;;
+        2) 
+            if [ "$(docker ps -a -q -f name=dockge)" ]; then
+                echo -e "${YELLOW}Dockge 已部署${NC}"
+                read -p "按回车键继续..." dummy
+            else
+                deploy_dockge
+                read -p "按回车键继续..." dummy
+            fi
+            ;;
+        3) manage_caddy_menu ;;
+        0) break ;;
+        *) 
+            echo -e "${RED}❌ 无效选项${NC}"
+            read -p "按回车键继续..." dummy
+            ;;
+    esac
+done
+
+cd /root
+echo -e "${GREEN}✅ 已安全退出并回到 /root 目录。${NC}"
 ---
 
 ## 🤖 3. AI 提示词
